@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
+use bevy::prelude::Resource;
 use vulkano::{
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
+        RenderPassBeginInfo, SubpassContents,
     },
-    device::Queue,
+    device::{DeviceOwned, Queue},
     format::Format,
     image::ImageAccess,
+    memory::allocator::StandardMemoryAllocator,
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     sync::GpuFuture,
 };
@@ -15,14 +18,21 @@ use vulkano_util::renderer::{DeviceImageView, SwapchainImageView};
 use crate::{camera::OrthographicCamera, quad_pipeline::DrawQuadPipeline};
 
 /// A render pass which places an image over screen frame
+
+#[derive(Resource)]
 pub struct FillScreenRenderPass {
     gfx_queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     quad_pipeline: DrawQuadPipeline,
+    command_buffer_allocator: StandardCommandBufferAllocator,
 }
 
 impl FillScreenRenderPass {
-    pub fn new(gfx_queue: Arc<Queue>, output_format: Format) -> FillScreenRenderPass {
+    pub fn new(
+        allocator: Arc<StandardMemoryAllocator>,
+        gfx_queue: Arc<Queue>,
+        output_format: Format,
+    ) -> FillScreenRenderPass {
         let render_pass = vulkano::single_pass_renderpass!(gfx_queue.device().clone(),
             attachments: {
                 color: {
@@ -40,11 +50,15 @@ impl FillScreenRenderPass {
         )
         .unwrap();
         let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
-        let quad_pipeline = DrawQuadPipeline::new(gfx_queue.clone(), subpass);
+        let quad_pipeline = DrawQuadPipeline::new(&allocator, gfx_queue.clone(), subpass);
         FillScreenRenderPass {
             gfx_queue,
             render_pass,
             quad_pipeline,
+            command_buffer_allocator: StandardCommandBufferAllocator::new(
+                allocator.device().clone(),
+                Default::default(),
+            ),
         }
     }
 
@@ -73,8 +87,8 @@ impl FillScreenRenderPass {
         .unwrap();
         // Create primary command buffer builder & begin render pass with black clear color
         let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
-            self.gfx_queue.device().clone(),
-            self.gfx_queue.family(),
+            &self.command_buffer_allocator,
+            self.gfx_queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )
         .unwrap();
@@ -87,8 +101,8 @@ impl FillScreenRenderPass {
                 SubpassContents::SecondaryCommandBuffers,
             )
             .unwrap();
-        // Create secondary command buffer from quad pipeline (subpass) and execute it inside our render pass.
-        // Then build the primary command buffer and execute it.
+        // Create secondary command buffer from quad pipeline (subpass) and execute it inside our
+        // render pass. Then build the primary command buffer and execute it.
         let cb =
             self.quad_pipeline
                 .draw(target_image.width_height(), camera, image, flip_x, flip_y);

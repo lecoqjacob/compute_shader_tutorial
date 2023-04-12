@@ -1,6 +1,6 @@
 use bevy::{
     math::{Mat4, Vec2},
-    prelude::Transform,
+    prelude::{Resource, Transform},
 };
 
 // c1r1: y flipped for vulkan
@@ -15,7 +15,7 @@ pub const OPENGL_TO_VULKAN_MATRIX: Mat4 = Mat4::from_cols_array(&[
 const Z_POS: f32 = -10.0;
 
 /// A simple orthographic camera
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Resource)]
 pub struct OrthographicCamera {
     pub pos: Vec2,
     pub left: f32,

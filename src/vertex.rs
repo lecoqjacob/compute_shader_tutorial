@@ -1,20 +1,22 @@
 use std::sync::Arc;
 
-use bytemuck::{Pod, Zeroable};
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer},
-    device::Device,
+    buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer},
+    memory::allocator::{AllocationCreateInfo, MemoryUsage, StandardMemoryAllocator},
+    pipeline::graphics::vertex_input::Vertex,
 };
 
 /// Vertex for textured quads.
 #[repr(C)]
-#[derive(Default, Debug, Copy, Clone, Zeroable, Pod)]
+#[derive(Default, Debug, Copy, Clone, BufferContents, Vertex)]
 pub struct TexturedVertex {
-    pub position: [f32; 2],
-    pub tex_coords: [f32; 2],
+    #[format(R32G32B32A32_SFLOAT)]
     pub color: [f32; 4],
+    #[format(R32G32_SFLOAT)]
+    pub position: [f32; 2],
+    #[format(R32G32_SFLOAT)]
+    pub tex_coords: [f32; 2],
 }
-vulkano::impl_vertex!(TexturedVertex, position, tex_coords, color);
 
 /// Textured quad with vertices & indices
 #[derive(Default, Debug, Copy, Clone)]
@@ -26,8 +28,8 @@ pub struct TexturedQuad {
 /// A set of vertices and their indices as cpu accessible buffers
 #[derive(Clone)]
 pub struct Mesh {
-    pub vertices: Arc<CpuAccessibleBuffer<[TexturedVertex]>>,
-    pub indices: Arc<CpuAccessibleBuffer<[u32]>>,
+    pub vertices: Subbuffer<[TexturedVertex]>,
+    pub indices: Subbuffer<[u32]>,
 }
 
 impl TexturedQuad {
@@ -61,19 +63,31 @@ impl TexturedQuad {
     }
 
     /// Converts Quad data to a mesh that can be used in drawing
-    pub fn to_mesh(self, device: Arc<Device>) -> Mesh {
+    pub fn to_mesh(self, allocator: &Arc<StandardMemoryAllocator>) -> Mesh {
         Mesh {
-            vertices: CpuAccessibleBuffer::<[TexturedVertex]>::from_iter(
-                device.clone(),
-                BufferUsage::vertex_buffer(),
-                false,
+            vertices: Buffer::from_iter(
+                allocator,
+                BufferCreateInfo {
+                    usage: BufferUsage::VERTEX_BUFFER,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    usage: MemoryUsage::Upload,
+                    ..Default::default()
+                },
                 self.vertices.into_iter(),
             )
             .unwrap(),
-            indices: CpuAccessibleBuffer::<[u32]>::from_iter(
-                device.clone(),
-                BufferUsage::index_buffer(),
-                false,
+            indices: Buffer::from_iter(
+                allocator,
+                BufferCreateInfo {
+                    usage: BufferUsage::INDEX_BUFFER,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    usage: MemoryUsage::Upload,
+                    ..Default::default()
+                },
                 self.indices.into_iter(),
             )
             .unwrap(),

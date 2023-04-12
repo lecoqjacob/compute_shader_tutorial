@@ -1,23 +1,24 @@
 [package]
-name = "cellular_automata"
-version = "0.1.0"
 edition = "2021"
+name    = "cellular_automata"
+version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy_vulkano = { version = "0.6.0", features = ["gui"] }
-bytemuck = "1.9.1"
-vulkano = "0.30.0"
-vulkano-shaders = "0.30.0"
-vulkano-util = "0.30.0"
-strum_macros = "0.24.0"
-strum = "0.24.0"
+bevy_vulkano    = { version = "0.12", features = ["gui"] }
+bytemuck        = "1"
+line_drawing    = "1"
+strum           = "0.24"
+strum_macros    = "0.24"
+vulkano         = "0.33"
+vulkano-shaders = "0.33"
+vulkano-util    = "0.33"
 
 [dependencies.bevy]
-version = "0.8.0"
 default-features = false
-features = []
+features         = []
+version          = "0.10"
 
 [profile.dev]
 opt-level = 3

@@ -1,28 +1,31 @@
 use std::sync::Arc;
 
 use vulkano::{
-    buffer::TypedBufferAccess,
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferInheritanceInfo, CommandBufferUsage,
-        SecondaryAutoCommandBuffer,
+        allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder,
+        CommandBufferInheritanceInfo, CommandBufferUsage, SecondaryAutoCommandBuffer,
     },
-    device::Queue,
+    descriptor_set::{
+        allocator::StandardDescriptorSetAllocator, PersistentDescriptorSet, WriteDescriptorSet,
+    },
+    device::{DeviceOwned, Queue},
     image::{ImageAccess, ImageViewAbstract},
+    memory::allocator::StandardMemoryAllocator,
     pipeline::{
         graphics::{
             color_blend::ColorBlendState,
             input_assembly::InputAssemblyState,
-            vertex_input::BuffersDefinition,
+            vertex_input::Vertex,
             viewport::{Viewport, ViewportState},
         },
         GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
     render_pass::Subpass,
+    sampler::{Filter, Sampler, SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode},
 };
 
 use crate::{
     camera::OrthographicCamera,
-    utils::create_image_sampler_nearest_descriptor_set,
     vertex::{Mesh, TexturedQuad, TexturedVertex},
 };
 
@@ -32,16 +35,22 @@ pub struct DrawQuadPipeline {
     pipeline: Arc<GraphicsPipeline>,
     subpass: Subpass,
     quad: Mesh,
+    command_buffer_allocator: StandardCommandBufferAllocator,
+    descriptor_set_allocator: StandardDescriptorSetAllocator,
 }
 
 impl DrawQuadPipeline {
-    pub fn new(gfx_queue: Arc<Queue>, subpass: Subpass) -> DrawQuadPipeline {
-        let quad = TexturedQuad::new(1.0, 1.0, [1.0; 4]).to_mesh(gfx_queue.device().clone());
+    pub fn new(
+        allocator: &Arc<StandardMemoryAllocator>,
+        gfx_queue: Arc<Queue>,
+        subpass: Subpass,
+    ) -> DrawQuadPipeline {
+        let quad = TexturedQuad::new(1.0, 1.0, [1.0; 4]).to_mesh(allocator);
         let pipeline = {
             let vs = vs::load(gfx_queue.device().clone()).expect("failed to create shader module");
             let fs = fs::load(gfx_queue.device().clone()).expect("failed to create shader module");
             GraphicsPipeline::start()
-                .vertex_input_state(BuffersDefinition::new().vertex::<TexturedVertex>())
+                .vertex_input_state(TexturedVertex::per_vertex())
                 .vertex_shader(vs.entry_point("main").unwrap(), ())
                 .input_assembly_state(InputAssemblyState::new())
                 .fragment_shader(fs.entry_point("main").unwrap(), ())
@@ -56,7 +65,33 @@ impl DrawQuadPipeline {
             pipeline,
             subpass,
             quad,
+            command_buffer_allocator: StandardCommandBufferAllocator::new(
+                allocator.device().clone(),
+                Default::default(),
+            ),
+            descriptor_set_allocator: StandardDescriptorSetAllocator::new(
+                allocator.device().clone(),
+            ),
         }
+    }
+
+    pub fn create_image_sampler_nearest_descriptor_set(
+        &self,
+        image: Arc<dyn ImageViewAbstract>,
+    ) -> Arc<PersistentDescriptorSet> {
+        let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
+        let sampler = Sampler::new(self.gfx_queue.device().clone(), SamplerCreateInfo {
+            mag_filter: Filter::Nearest,
+            min_filter: Filter::Nearest,
+            address_mode: [SamplerAddressMode::Repeat; 3],
+            mipmap_mode: SamplerMipmapMode::Nearest,
+            ..Default::default()
+        })
+        .unwrap();
+        PersistentDescriptorSet::new(&self.descriptor_set_allocator, layout.clone(), [
+            WriteDescriptorSet::image_view_sampler(0, image.clone(), sampler),
+        ])
+        .unwrap()
     }
 
     /// Draw input `image` on a quad at (0.0, 0.0), between -1.0 and 1.0
@@ -70,8 +105,8 @@ impl DrawQuadPipeline {
     ) -> SecondaryAutoCommandBuffer {
         // Command buffer for our single subpass
         let mut builder = AutoCommandBufferBuilder::secondary(
-            self.gfx_queue.device().clone(),
-            self.gfx_queue.family(),
+            &self.command_buffer_allocator,
+            self.gfx_queue.queue_family_index(),
             CommandBufferUsage::MultipleSubmit,
             CommandBufferInheritanceInfo {
                 render_pass: Some(self.subpass.clone().into()),
@@ -81,7 +116,7 @@ impl DrawQuadPipeline {
         .unwrap();
 
         let dims = image.image().dimensions();
-        let push_constants = vs::ty::PushConstants {
+        let push_constants = vs::PushConstants {
             world_to_screen: camera.world_to_screen().to_cols_array_2d(),
             // Scale transforms our 1.0 sized quad to actual pixel size in screen space
             scale: [
@@ -90,11 +125,7 @@ impl DrawQuadPipeline {
             ],
         };
 
-        let image_sampler_descriptor_set = create_image_sampler_nearest_descriptor_set(
-            self.gfx_queue.device().clone(),
-            self.pipeline.clone(),
-            image,
-        );
+        let image_sampler_descriptor_set = self.create_image_sampler_nearest_descriptor_set(image);
         builder
             .set_viewport(0, [Viewport {
                 origin: [0.0, 0.0],
@@ -120,13 +151,13 @@ impl DrawQuadPipeline {
 mod vs {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "shaders/quad_vert.glsl"
+        path: "shaders/quad_vert.glsl",
     }
 }
 
 mod fs {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "shaders/quad_frag.glsl"
+        path: "shaders/quad_frag.glsl",
     }
 }
